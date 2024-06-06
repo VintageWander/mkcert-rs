@@ -1,0 +1,7 @@
+{
+  "common_name": "Mkcert Development Certificate",
+  "locality": "San Francisco",
+  "country": "US",
+  "org_unit": "Development",
+  "org_name": "Mkcert"
+}

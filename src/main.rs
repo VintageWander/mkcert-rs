@@ -1,16 +1,37 @@
-mod env;
-
 use clap::Parser;
-use env::{common_name, country, home_dir, locality, org_name, org_unit};
 use rcgen::{
     BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, KeyPair,
     KeyUsagePurpose, PKCS_ECDSA_P256_SHA256,
 };
+use serde::Deserialize;
 use std::{fs, process::Command};
 use thiserror::Error;
 
+#[derive(Deserialize)]
+struct Config {
+    common_name: Option<String>,
+    locality: Option<String>,
+    country: Option<String>,
+    org_unit: Option<String>,
+    org_name: Option<String>,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            common_name: Some("Mkcert Development Certificate".into()),
+            locality: Some("San Francisco".into()),
+            country: Some("US".into()),
+            org_unit: Some("Development".into()),
+            org_name: Some("Mkcert".into()),
+        }
+    }
+}
+
 #[derive(Debug, Error)]
 enum Error {
+    #[error("Cannot parse config file")]
+    Config(#[from] serde_json::Error),
     #[error("Rcgen error: {0:#?}")]
     Rcgen(#[from] rcgen::Error),
     #[error("IO error: {0:#?}")]
@@ -47,29 +68,48 @@ enum Cli {
 }
 
 fn main() -> Result<(), String> {
+    pre_main()?;
+    Ok(())
+}
+
+fn pre_main() -> Result<(), Error> {
+    let config: Config = serde_json::from_str(&fs::read_to_string("./config.json")?)?;
     let cli = Cli::parse();
     match cli {
-        Cli::Install => install(),
-        Cli::Uninstall => uninstall(),
+        Cli::Install => install(&config),
+        Cli::Uninstall => uninstall(&config),
         Cli::New { cert, key, sans } => new_cert(cert, key, sans),
     }?;
     Ok(())
 }
 
-fn install() -> Result<(), Error> {
+fn install(
+    Config {
+        common_name,
+        locality,
+        country,
+        org_unit,
+        org_name,
+    }: &Config,
+) -> Result<(), Error> {
     let private_key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256)?;
 
     let mut cert = CertificateParams::default();
 
     cert.distinguished_name
-        .push(DnType::CommonName, common_name());
+        .push(DnType::CommonName, common_name.clone().unwrap_or_default());
     cert.distinguished_name
-        .push(DnType::LocalityName, locality());
-    cert.distinguished_name.push(DnType::CountryName, country());
+        .push(DnType::LocalityName, locality.clone().unwrap_or_default());
     cert.distinguished_name
-        .push(DnType::OrganizationName, org_name());
-    cert.distinguished_name
-        .push(DnType::OrganizationalUnitName, org_unit());
+        .push(DnType::CountryName, country.clone().unwrap_or_default());
+    cert.distinguished_name.push(
+        DnType::OrganizationName,
+        org_name.clone().unwrap_or_default(),
+    );
+    cert.distinguished_name.push(
+        DnType::OrganizationalUnitName,
+        org_unit.clone().unwrap_or_default(),
+    );
     cert.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
     cert.key_usages = vec![
         KeyUsagePurpose::DigitalSignature,
@@ -111,7 +151,7 @@ fn install() -> Result<(), Error> {
     Ok(())
 }
 
-fn uninstall() -> Result<(), Error> {
+fn uninstall(Config { common_name, .. }: &Config) -> Result<(), Error> {
     let home = home_dir();
     let path = format!("{home}/Library/Application Support/mkcert-rs/");
 
@@ -121,7 +161,7 @@ fn uninstall() -> Result<(), Error> {
     let command = Command::new("security")
         .arg("delete-certificate")
         .arg("-c")
-        .arg(common_name())
+        .arg(common_name.clone().unwrap_or_default())
         .arg("-t")
         .arg(format!("{home}/Library/Keychains/login.keychain-db"))
         .output()?;
@@ -170,4 +210,11 @@ fn new_cert(cert_name: String, key_name: String, sans: Vec<String>) -> Result<()
     println!("Created new certificate in {path}");
 
     Ok(())
+}
+
+pub fn home_dir() -> String {
+    std::env::var_os("HOME")
+        .expect("No HOME environment variable set")
+        .into_string()
+        .expect("Invalid HOME environment variable")
 }

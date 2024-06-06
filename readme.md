@@ -6,7 +6,7 @@ This tool generates certificates and key, deriving from a self-signed root CA (w
 
 # Usage
 
-Check out the [`.env.sample`](./.env.sample) file to see which are the options you can adjust to your likings. <br>
+Check out the [`config.json`](./config.json) file to see which are the options you can adjust to your likings. <br>
 However you don't have to supply anything as there are defaults. <br>
 Here are the defaults:
 ```toml
