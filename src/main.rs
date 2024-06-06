@@ -73,7 +73,10 @@ fn main() -> Result<(), String> {
 }
 
 fn pre_main() -> Result<(), Error> {
-    let config: Config = serde_json::from_str(&fs::read_to_string("./config.json")?)?;
+    let config: Config = serde_json::from_str(&fs::read_to_string(format!(
+        "{}/.config/mkcert-rs/config.json",
+        home_dir()
+    ))?)?;
     let cli = Cli::parse();
     match cli {
         Cli::Install => install(&config),

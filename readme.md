@@ -6,16 +6,20 @@ This tool generates certificates and key, deriving from a self-signed root CA (w
 
 # Usage
 
-Check out the [`config.json`](./config.json) file to see which are the options you can adjust to your likings. <br>
+Check out the [`config.sample.json`](./config.sample.json) file to see which are the options you can adjust to your likings. <br>
 However you don't have to supply anything as there are defaults. <br>
 Here are the defaults:
-```toml
-COMMON_NAME = "Mkcert Development Certificate"
-LOCALITY = "San Francisco"
-COUNTRY = "US"
-ORG_UNIT = "Development"
-ORG_NAME = "Mkcert"
+```json
+{
+  "common_name": "Mkcert Development Certificate",
+  "locality": "San Francisco",
+  "country": "US",
+  "org_unit": "Development",
+  "org_name": "Mkcert"
+}
 ```
+Rename from `config.sample.json` to `config.json`, and place the file at `$HOME/.config/mkcert-rs/config.json`<br>
+
 
 ```
 Usage: mkcert-rs <COMMAND>
