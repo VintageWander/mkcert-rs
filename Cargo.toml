@@ -1,0 +1,16 @@
+[package]
+name = "mkcert-rs"
+version = "0.1.0"
+edition = "2021"
+
+[profile.release]
+strip = true
+panic = "abort"
+codegen-units = 1
+
+[dependencies]
+clap = { version = "4.5.4", features = ["derive"] }
+rcgen = { version = "0.13.1", features = ["x509-parser", "crypto"] }
+thiserror = { version = "1.0.61" }
+dotenvy = { version = "0.15.7" }
+rustls-pemfile = { version = "2.1.2" }
