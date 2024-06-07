@@ -2,7 +2,8 @@
 I tried rewritting `mkcert` but in Rust, using mainly the `rcgen` library that `rustls` provides <br>
 This tool generates certificates and key, deriving from a self-signed root CA (which this tool also provides), making development that needs TLS testing much easier
 
-<u>NOTE</u>: Only macOS supported, since it uses macOS's Application Support path, and using the login keychain store
+<u>NOTE</u>: Only macOS supported, since it uses macOS's Application Support path, and using the login keychain store<br>
+<u>NOTE</u>: Do make sure that you have `openssl` installed, since the certificate will also export in `.p12` format and import it to the certificate trust store
 
 # Usage
 
@@ -34,3 +35,7 @@ Options:
   -h, --help     Print help
   -V, --version  Print version
 ```
+
+# Troubleshooting
+## Firefox
+Currently I haven't figured out a way to make Firefox works out of the box, you have to import the `rootCA.p12` cert manually into Firefox<br>

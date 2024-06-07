@@ -81,7 +81,7 @@ fn pre_main() -> Result<(), Error> {
     match cli {
         Cli::Install => install(&config),
         Cli::Uninstall => uninstall(&config),
-        Cli::New { cert, key, sans } => new_cert(cert, key, sans),
+        Cli::New { cert, key, sans } => new_cert(cert, key, sans, &config),
     }?;
     Ok(())
 }
@@ -132,15 +132,32 @@ fn install(
 
     // Write to rootCA.crt and rootCA.key
     fs::write(&root_cert_path, ca_cert.pem().as_bytes())?;
-    fs::write(root_key_path, private_key.serialize_pem().as_bytes())?;
+    fs::write(&root_key_path, private_key.serialize_pem().as_bytes())?;
     println!("Created certificates in {}", path);
+
+    // If the machine has openssl installed, the tool will also create rootCA.p12
+    // This is for importing into Firefox
+    let command = Command::new("openssl")
+        .arg("pkcs12")
+        .arg("-export")
+        .arg("-inkey")
+        .arg(root_key_path)
+        .arg("-in")
+        .arg(root_cert_path)
+        .arg("-out")
+        .arg(format!("{path}/rootCA.p12"))
+        .output()?;
+
+    if command.status.success() {
+        println!("Created rootCA.p12 in {}", path);
+    }
 
     let command = Command::new("security")
         .arg("add-trusted-cert")
         // .arg("-d")
         .arg("-k")
         .arg(format!("{home}/Library/Keychains/login.keychain-db"))
-        .arg(root_cert_path)
+        .arg(format!("{path}/rootCA.p12"))
         .output()?;
 
     if command.status.success() {
@@ -158,9 +175,6 @@ fn uninstall(Config { common_name, .. }: &Config) -> Result<(), Error> {
     let home = home_dir();
     let path = format!("{home}/Library/Application Support/mkcert-rs/");
 
-    let root_cert_path = format!("{path}/rootCA.crt");
-    let root_key_path = format!("{path}/rootCA.key");
-
     let command = Command::new("security")
         .arg("delete-certificate")
         .arg("-c")
@@ -177,13 +191,23 @@ fn uninstall(Config { common_name, .. }: &Config) -> Result<(), Error> {
         return Err(Error::Cert(err_msg));
     }
 
-    fs::remove_file(&root_cert_path)?;
-    fs::remove_file(&root_key_path)?;
+    fs::remove_dir_all(path)?;
     println!("Removed certificates from /Application Support/mkcert-rs");
     Ok(())
 }
 
-fn new_cert(cert_name: String, key_name: String, sans: Vec<String>) -> Result<(), Error> {
+fn new_cert(
+    cert_name: String,
+    key_name: String,
+    sans: Vec<String>,
+    Config {
+        common_name,
+        locality,
+        country,
+        org_unit,
+        org_name,
+    }: &Config,
+) -> Result<(), Error> {
     let path = format!("{}/Library/Application Support/mkcert-rs/", home_dir());
     let root_cert_path = format!("{path}/rootCA.crt");
     let root_key_path = format!("{path}/rootCA.key");
@@ -197,11 +221,29 @@ fn new_cert(cert_name: String, key_name: String, sans: Vec<String>) -> Result<()
     .self_signed(&root_key)?;
 
     let new_key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256)?;
-    let new_certificate =
-        CertificateParams::new(sans)?.signed_by(&new_key, &root_cert, &root_key)?;
+    let mut new_certificate = CertificateParams::new(sans)?;
+
+    new_certificate
+        .distinguished_name
+        .push(DnType::CommonName, common_name.clone().unwrap_or_default());
+    new_certificate
+        .distinguished_name
+        .push(DnType::LocalityName, locality.clone().unwrap_or_default());
+    new_certificate
+        .distinguished_name
+        .push(DnType::CountryName, country.clone().unwrap_or_default());
+    new_certificate.distinguished_name.push(
+        DnType::OrganizationName,
+        org_name.clone().unwrap_or_default(),
+    );
+    new_certificate.distinguished_name.push(
+        DnType::OrganizationalUnitName,
+        org_unit.clone().unwrap_or_default(),
+    );
+
+    let new_certificate = new_certificate.signed_by(&new_key, &root_cert, &root_key)?;
 
     let path = std::env::current_dir()?.to_str().unwrap().to_string();
-
     fs::write(
         format!("{path}/{cert_name}"),
         new_certificate.pem().as_bytes(),
