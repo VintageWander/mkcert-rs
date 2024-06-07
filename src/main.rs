@@ -124,7 +124,7 @@ fn install(
     let ca_cert = cert.self_signed(&private_key)?;
 
     let home = home_dir();
-    let path = format!("{home}/Library/Application Support/mkcert-rs/");
+    let path = format!("{home}/Library/Application Support/mkcert-rs");
     fs::create_dir_all(&path)?;
 
     let root_cert_path = format!("{path}/rootCA.crt");
@@ -173,7 +173,7 @@ fn install(
 
 fn uninstall(Config { common_name, .. }: &Config) -> Result<(), Error> {
     let home = home_dir();
-    let path = format!("{home}/Library/Application Support/mkcert-rs/");
+    let path = format!("{home}/Library/Application Support/mkcert-rs");
 
     let command = Command::new("security")
         .arg("delete-certificate")
@@ -208,7 +208,7 @@ fn new_cert(
         org_name,
     }: &Config,
 ) -> Result<(), Error> {
-    let path = format!("{}/Library/Application Support/mkcert-rs/", home_dir());
+    let path = format!("{}/Library/Application Support/mkcert-rs", home_dir());
     let root_cert_path = format!("{path}/rootCA.crt");
     let root_key_path = format!("{path}/rootCA.key");
 
