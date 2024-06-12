@@ -1,7 +1,7 @@
 use clap::Parser;
 use rcgen::{
     BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, KeyPair,
-    KeyUsagePurpose, PKCS_ECDSA_P256_SHA256,
+    KeyUsagePurpose, PKCS_ECDSA_P384_SHA384,
 };
 use serde::Deserialize;
 use std::{fs, process::Command};
@@ -95,7 +95,7 @@ fn install(
         org_name,
     }: &Config,
 ) -> Result<(), Error> {
-    let private_key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256)?;
+    let private_key = KeyPair::generate_for(&PKCS_ECDSA_P384_SHA384)?;
 
     let mut cert = CertificateParams::default();
 
@@ -143,13 +143,15 @@ fn install(
         .arg("-inkey")
         .arg(root_key_path)
         .arg("-in")
-        .arg(root_cert_path)
+        .arg(&root_cert_path)
         .arg("-out")
         .arg(format!("{path}/rootCA.p12"))
-        .output()?;
+        .output();
 
-    if command.status.success() {
-        println!("Created rootCA.p12 in {}", path);
+    if let Ok(command) = command {
+        if command.status.success() {
+            println!("Created rootCA.p12 in {}", path);
+        }
     }
 
     let command = Command::new("security")
@@ -157,7 +159,7 @@ fn install(
         // .arg("-d")
         .arg("-k")
         .arg(format!("{home}/Library/Keychains/login.keychain-db"))
-        .arg(format!("{path}/rootCA.p12"))
+        .arg(root_cert_path)
         .output()?;
 
     if command.status.success() {
@@ -220,7 +222,7 @@ fn new_cert(
     )?
     .self_signed(&root_key)?;
 
-    let new_key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256)?;
+    let new_key = KeyPair::generate_for(&PKCS_ECDSA_P384_SHA384)?;
     let mut new_certificate = CertificateParams::new(sans)?;
 
     new_certificate
