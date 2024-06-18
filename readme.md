@@ -7,9 +7,8 @@ This tool generates certificates and key, deriving from a self-signed root CA (w
 
 # Usage
 
-Check out the [`config.sample.json`](./config.sample.json) file to see which are the options you can adjust to your likings. <br>
-However you don't have to supply anything as there are defaults. <br>
-Here are the defaults:
+Run the command `mkcert-rs` for the first time for the tool to create the initial configuration file at `$HOME/.config/mkcert-rs/config.json`<br>
+The config file looks like this: <br>
 ```json
 {
   "common_name": "Mkcert Development Certificate",
@@ -19,9 +18,18 @@ Here are the defaults:
   "org_name": "Mkcert"
 }
 ```
-Rename from `config.sample.json` to `config.json`, and place the file at `$HOME/.config/mkcert-rs/config.json`<br>
 
+You can adjust it to your likings
 
+After that, run `mkcert-rs install`, the tool will
+- Create `rootCA.crt` and `rootCA.key` into `$HOME/Library/Application Support/mkcert-rs`
+- Install them into `$HOME/Library/Keychains/login.keychain-db`, which is the `login` keychain in the `Keychain Access` app
+
+If you have `openssl` installed, the tool will automatically create `rootCA.p12` key, type in your encryption passphrase and the command will complete
+
+The `.p12` file can be used to manually add into your `Firefox` browser certificates
+
+## Options
 ```
 Usage: mkcert-rs <COMMAND>
 
@@ -37,5 +45,5 @@ Options:
 ```
 
 # Troubleshooting
-## Firefox
-Currently I haven't figured out a way to make Firefox works out of the box, you have to import the `rootCA.p12` cert manually into Firefox<br>
+## `Firefox`
+Currently I haven't figured out a way to make `Firefox` works out of the box, you have to import the `rootCA.p12` cert manually into Firefox<br>
