@@ -3,11 +3,11 @@ use rcgen::{
     BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, KeyPair,
     KeyUsagePurpose, PKCS_ECDSA_P384_SHA384,
 };
-use serde::Deserialize;
-use std::{fs, process::Command};
+use serde::{Deserialize, Serialize};
+use std::{fs, path::Path, process::Command};
 use thiserror::Error;
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 struct Config {
     common_name: Option<String>,
     locality: Option<String>,
@@ -61,7 +61,7 @@ enum Cli {
         /// Rename the new private key (example: localhost.key).
         #[arg(long, default_value = "server.key")]
         key: String,
-        /// Set Subject Alternate Names
+        /// Set Subject Alternate Names (example: localhost,google.com,postgres)
         #[arg(long, value_delimiter = ',')]
         sans: Vec<String>,
     },
@@ -73,16 +73,23 @@ fn main() -> Result<(), String> {
 }
 
 fn pre_main() -> Result<(), Error> {
-    let config: Config = serde_json::from_str(&fs::read_to_string(format!(
-        "{}/.config/mkcert-rs/config.json",
-        home_dir()
-    ))?)?;
-    let cli = Cli::parse();
-    match cli {
+    let home = home_dir();
+    let config_parent = format!("{home}/.config/mkcert-rs");
+    let config_path = format!("{home}/.config/mkcert-rs/config.json");
+
+    if !Path::new(&config_path).exists() {
+        fs::create_dir_all(config_parent)?;
+        fs::write(&config_path, serde_json::to_string(&Config::default())?)?
+    };
+
+    let config: Config = serde_json::from_str(&fs::read_to_string(config_path)?)?;
+
+    match Cli::parse() {
         Cli::Install => install(&config),
         Cli::Uninstall => uninstall(&config),
         Cli::New { cert, key, sans } => new_cert(cert, key, sans, &config),
     }?;
+
     Ok(())
 }
 
@@ -135,31 +142,11 @@ fn install(
     fs::write(&root_key_path, private_key.serialize_pem().as_bytes())?;
     println!("Created certificates in {}", path);
 
-    // If the machine has openssl installed, the tool will also create rootCA.p12
-    // This is for importing into Firefox
-    let command = Command::new("openssl")
-        .arg("pkcs12")
-        .arg("-export")
-        .arg("-inkey")
-        .arg(root_key_path)
-        .arg("-in")
-        .arg(&root_cert_path)
-        .arg("-out")
-        .arg(format!("{path}/rootCA.p12"))
-        .output();
-
-    if let Ok(command) = command {
-        if command.status.success() {
-            println!("Created rootCA.p12 in {}", path);
-        }
-    }
-
     let command = Command::new("security")
         .arg("add-trusted-cert")
-        // .arg("-d")
         .arg("-k")
         .arg(format!("{home}/Library/Keychains/login.keychain-db"))
-        .arg(root_cert_path)
+        .arg(&root_cert_path)
         .output()?;
 
     if command.status.success() {
@@ -168,6 +155,25 @@ fn install(
         let err_msg = format!("Error: {:#?}", command);
         eprintln!("{err_msg}");
         return Err(Error::Cert(err_msg));
+    }
+
+    // If the machine has openssl installed, the tool will also create rootCA.p12
+    // This is for manual importing into Firefox
+    let command = Command::new("openssl")
+        .arg("pkcs12")
+        .arg("-export")
+        .arg("-in")
+        .arg(root_cert_path)
+        .arg("-inkey")
+        .arg(root_key_path)
+        .arg("-out")
+        .arg(format!("{path}/rootCA.p12"))
+        .output();
+
+    if let Ok(command) = command {
+        if command.status.success() {
+            println!("Created rootCA.p12 in {}", path);
+        }
     }
 
     Ok(())
