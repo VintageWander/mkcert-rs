@@ -49,11 +49,11 @@ impl From<Error> for String {
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 enum Cli {
-    /// Install the certificate to the system trust store
-    Install,
-    /// Remove the certificate from the system trust store
-    Uninstall,
-    /// Create a new certificate
+    /// Install the certificate authority to the system trust store
+    InstallCa,
+    /// Remove the certificate authority from the system trust store
+    UninstallCa,
+    /// Create a new certificate, signed by certificate authority
     New {
         /// Rename the new certificate (example: localhost.crt).
         #[arg(long, default_value = "server.crt")]
@@ -65,6 +65,13 @@ enum Cli {
         #[arg(long, value_delimiter = ',')]
         sans: Vec<String>,
     },
+}
+
+fn home_dir() -> String {
+    std::env::var_os("HOME")
+        .expect("No HOME environment variable set")
+        .into_string()
+        .expect("Invalid HOME environment variable")
 }
 
 fn main() -> Result<(), String> {
@@ -85,8 +92,8 @@ fn pre_main() -> Result<(), Error> {
     let config: Config = serde_json::from_str(&fs::read_to_string(config_path)?)?;
 
     match Cli::parse() {
-        Cli::Install => config.install(),
-        Cli::Uninstall => config.uninstall(),
+        Cli::InstallCa => config.install_ca(),
+        Cli::UninstallCa => config.uninstall_ca(),
         Cli::New { cert, key, sans } => config.new_cert(cert, key, sans),
     }?;
 
@@ -94,7 +101,7 @@ fn pre_main() -> Result<(), Error> {
 }
 
 impl Config {
-    fn install(self) -> Result<(), Error> {
+    fn install_ca(self) -> Result<(), Error> {
         let private_key = KeyPair::generate_for(&PKCS_ECDSA_P384_SHA384)?;
 
         let mut cert = CertificateParams::default();
@@ -178,7 +185,7 @@ impl Config {
         Ok(())
     }
 
-    fn uninstall(self) -> Result<(), Error> {
+    fn uninstall_ca(self) -> Result<(), Error> {
         let home = home_dir();
         let path = format!("{home}/Library/Application Support/mkcert-rs");
 
@@ -255,11 +262,4 @@ impl Config {
 
         Ok(())
     }
-}
-
-pub fn home_dir() -> String {
-    std::env::var_os("HOME")
-        .expect("No HOME environment variable set")
-        .into_string()
-        .expect("Invalid HOME environment variable")
 }
