@@ -1,32 +1,19 @@
+mod config;
 use clap::Parser;
+
 use rcgen::{
     BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, KeyPair,
     KeyUsagePurpose, PKCS_ECDSA_P384_SHA384,
 };
-use serde::{Deserialize, Serialize};
-use std::{fs, path::Path, process::Command};
+use sha1::{Digest, Sha1};
+use std::{
+    fs::OpenOptions,
+    io::{Read, Write},
+    process::Command,
+};
 use thiserror::Error;
 
-#[derive(Serialize, Deserialize)]
-struct Config {
-    common_name: Option<String>,
-    locality: Option<String>,
-    country: Option<String>,
-    org_unit: Option<String>,
-    org_name: Option<String>,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            common_name: Some("Mkcert Development Certificate".into()),
-            locality: Some("San Francisco".into()),
-            country: Some("US".into()),
-            org_unit: Some("Development".into()),
-            org_name: Some("Mkcert".into()),
-        }
-    }
-}
+use crate::config::{get_config_path, Config};
 
 #[derive(Debug, Error)]
 enum Error {
@@ -38,6 +25,8 @@ enum Error {
     Io(#[from] std::io::Error),
     #[error("Failed to add certificate to the system trust store")]
     Cert(String),
+    #[error("Could not get home directory")]
+    NoHomeDir,
 }
 
 impl From<Error> for String {
@@ -67,199 +56,210 @@ enum Cli {
     },
 }
 
-fn home_dir() -> String {
-    std::env::var_os("HOME")
-        .expect("No HOME environment variable set")
-        .into_string()
-        .expect("Invalid HOME environment variable")
-}
-
 fn main() -> Result<(), String> {
-    pre_main()?;
-    Ok(())
-}
-
-fn pre_main() -> Result<(), Error> {
-    let home = home_dir();
-    let config_parent = format!("{home}/.config/mkcert-rs");
-    let config_path = format!("{home}/.config/mkcert-rs/config.json");
-
-    if !Path::new(&config_path).exists() {
-        fs::create_dir_all(config_parent)?;
-        fs::write(&config_path, serde_json::to_string(&Config::default())?)?
-    };
-
-    let config: Config = serde_json::from_str(&fs::read_to_string(config_path)?)?;
-
     match Cli::parse() {
-        Cli::InstallCa => config.install_ca(),
-        Cli::UninstallCa => config.uninstall_ca(),
-        Cli::New { cert, key, sans } => config.new_cert(cert, key, sans),
+        Cli::InstallCa => install_ca(),
+        Cli::UninstallCa => uninstall_ca(),
+        Cli::New { cert, key, sans } => new_cert(cert, key, sans),
     }?;
 
     Ok(())
 }
 
-impl Config {
-    fn install_ca(self) -> Result<(), Error> {
-        let private_key = KeyPair::generate_for(&PKCS_ECDSA_P384_SHA384)?;
+fn install_ca() -> Result<(), Error> {
+    let config = Config::read_config()?;
 
-        let mut cert = CertificateParams::default();
+    let mut cert_params = CertificateParams::default();
 
-        cert.distinguished_name.push(
-            DnType::CommonName,
-            self.common_name.clone().unwrap_or_default(),
-        );
-        cert.distinguished_name.push(
-            DnType::LocalityName,
-            self.locality.clone().unwrap_or_default(),
-        );
-        cert.distinguished_name.push(
-            DnType::CountryName,
-            self.country.clone().unwrap_or_default(),
-        );
-        cert.distinguished_name.push(
-            DnType::OrganizationName,
-            self.org_name.clone().unwrap_or_default(),
-        );
-        cert.distinguished_name.push(
-            DnType::OrganizationalUnitName,
-            self.org_unit.clone().unwrap_or_default(),
-        );
-        cert.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
-        cert.key_usages = vec![
-            KeyUsagePurpose::DigitalSignature,
-            KeyUsagePurpose::KeyEncipherment,
-            KeyUsagePurpose::KeyCertSign,
-        ];
-        cert.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
+    cert_params.distinguished_name.push(
+        DnType::CommonName,
+        config.common_name.clone().unwrap_or_default(),
+    );
+    cert_params.distinguished_name.push(
+        DnType::LocalityName,
+        config.locality.clone().unwrap_or_default(),
+    );
+    cert_params.distinguished_name.push(
+        DnType::CountryName,
+        config.country.clone().unwrap_or_default(),
+    );
+    cert_params.distinguished_name.push(
+        DnType::OrganizationName,
+        config.org_name.clone().unwrap_or_default(),
+    );
+    cert_params.distinguished_name.push(
+        DnType::OrganizationalUnitName,
+        config.org_unit.clone().unwrap_or_default(),
+    );
+    cert_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+    cert_params.key_usages = vec![
+        KeyUsagePurpose::DigitalSignature,
+        KeyUsagePurpose::KeyEncipherment,
+        KeyUsagePurpose::KeyCertSign,
+    ];
+    cert_params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
 
-        let ca_cert = cert.self_signed(&private_key)?;
+    let private_key = KeyPair::generate_for(&PKCS_ECDSA_P384_SHA384)?;
 
-        let home = home_dir();
-        let path = format!("{home}/Library/Application Support/mkcert-rs");
-        fs::create_dir_all(&path)?;
+    let ca_cert = cert_params.self_signed(&private_key)?;
 
-        let root_cert_path = format!("{path}/rootCA.crt");
-        let root_key_path = format!("{path}/rootCA.key");
+    let path = get_config_path()?;
 
-        // Write to rootCA.crt and rootCA.key
-        fs::write(&root_cert_path, ca_cert.pem().as_bytes())?;
-        fs::write(&root_key_path, private_key.serialize_pem().as_bytes())?;
-        println!("Created certificates in {}", path);
+    let root_cert_path = path.join("rootCA.crt");
+    let root_key_path = path.join("rootCA.key");
 
-        let command = Command::new("security")
+    std::fs::write(&root_cert_path, ca_cert.pem().as_bytes())?;
+    std::fs::write(&root_key_path, private_key.serialize_pem().as_bytes())?;
+
+    println!("Created certificates in {}", path.display());
+
+    #[cfg(target_os = "macos")]
+    let command = {
+        let home = dirs::home_dir().unwrap();
+        let home = home.to_str().unwrap();
+        Command::new("security")
             .arg("add-trusted-cert")
             .arg("-k")
             .arg(format!("{home}/Library/Keychains/login.keychain-db"))
             .arg(&root_cert_path)
-            .output()?;
+            .output()?
+    };
 
-        if command.status.success() {
-            println!("Added certificates to the system trust store");
-        } else {
-            let err_msg = format!("Error: {:#?}", command);
-            eprintln!("{err_msg}");
-            return Err(Error::Cert(err_msg));
-        }
+    #[cfg(target_os = "windows")]
+    let command = Command::new("certutil")
+        .arg("-addstore")
+        .arg("Root")
+        .arg(&root_cert_path)
+        .output()?;
 
-        // If the machine has openssl installed, the tool will also create rootCA.p12
-        // This is for manual importing into Firefox
-        let command = Command::new("openssl")
-            .arg("pkcs12")
-            .arg("-export")
-            .arg("-in")
-            .arg(root_cert_path)
-            .arg("-inkey")
-            .arg(root_key_path)
-            .arg("-out")
-            .arg(format!("{path}/rootCA.p12"))
-            .output();
-
-        if let Ok(command) = command {
-            if command.status.success() {
-                println!("Created rootCA.p12 in {}", path);
-            }
-        }
-
-        Ok(())
+    if command.status.success() {
+        println!("Added certificates to the system trust store");
+    } else {
+        let err_msg = format!("Error: {:#?}", command);
+        eprintln!("{err_msg}");
+        return Err(Error::Cert(err_msg));
     }
 
-    fn uninstall_ca(self) -> Result<(), Error> {
-        let home = home_dir();
-        let path = format!("{home}/Library/Application Support/mkcert-rs");
+    let mut hasher = Sha1::new();
+    hasher.update(ca_cert.der());
+    let thumbprint_bytes = hasher.finalize();
+    let thumbprint = format!("{:X}", thumbprint_bytes);
+    Config::write_config(&Config {
+        thumbprint: Some(thumbprint),
+        ..config
+    })?;
 
-        let command = Command::new("security")
-            .arg("delete-certificate")
-            .arg("-c")
-            .arg(self.common_name.clone().unwrap_or_default())
-            .arg("-t")
-            .arg(format!("{home}/Library/Keychains/login.keychain-db"))
-            .output()?;
+    Ok(())
+}
 
-        if command.status.success() {
-            println!("Removed certificates from the system trust store");
-        } else {
-            let err_msg = format!("Error: {:#?}", command);
-            eprintln!("{err_msg}");
-            return Err(Error::Cert(err_msg));
-        }
+fn uninstall_ca() -> Result<(), Error> {
+    let config = Config::read_config()?;
 
-        fs::remove_dir_all(path)?;
-        println!("Removed certificates from /Application Support/mkcert-rs");
-        Ok(())
+    let thumbprint = config.thumbprint.as_ref().ok_or_else(|| {
+        Error::Cert(
+            "CA thumbprint not found in config. Cannot uninstall. Was the CA ever installed?"
+                .to_string(),
+        )
+    })?;
+
+    #[cfg(target_os = "macos")]
+    let command = Command::new("security")
+        .arg("delete-certificate")
+        .arg("-Z")
+        .arg(thumbprint)
+        .output()?;
+
+    #[cfg(target_os = "windows")]
+    let command = Command::new("certutil")
+        .arg("-delstore")
+        .arg("Root")
+        .arg(thumbprint)
+        .output()?;
+
+    if command.status.success() {
+        println!("Removed certificates from the system trust store");
+    } else {
+        let err_msg = format!("Error: {:#?}", command);
+        eprintln!("{err_msg}");
+        return Err(Error::Cert(err_msg));
     }
 
-    fn new_cert(self, cert_name: String, key_name: String, sans: Vec<String>) -> Result<(), Error> {
-        let path = format!("{}/Library/Application Support/mkcert-rs", home_dir());
-        let root_cert_path = format!("{path}/rootCA.crt");
-        let root_key_path = format!("{path}/rootCA.key");
+    let path = get_config_path()?;
+    std::fs::remove_dir_all(path)?;
+    println!("Removed certificates");
 
-        let root_key =
-            KeyPair::from_pem(std::str::from_utf8(fs::read(root_key_path)?.as_slice()).unwrap())?;
+    Config::write_config(&Config {
+        thumbprint: None,
+        ..config
+    })?;
+    Ok(())
+}
 
-        let root_cert = CertificateParams::from_ca_cert_pem(
-            std::str::from_utf8(fs::read(root_cert_path)?.as_slice()).unwrap(),
-        )?
-        .self_signed(&root_key)?;
+fn new_cert(cert_name: String, key_name: String, sans: Vec<String>) -> Result<(), Error> {
+    let config = Config::read_config()?;
 
-        let new_key = KeyPair::generate_for(&PKCS_ECDSA_P384_SHA384)?;
-        let mut new_certificate = CertificateParams::new(sans)?;
+    let path = get_config_path()?;
 
-        new_certificate.distinguished_name.push(
-            DnType::CommonName,
-            self.common_name.clone().unwrap_or_default(),
-        );
-        new_certificate.distinguished_name.push(
-            DnType::LocalityName,
-            self.locality.clone().unwrap_or_default(),
-        );
-        new_certificate.distinguished_name.push(
-            DnType::CountryName,
-            self.country.clone().unwrap_or_default(),
-        );
-        new_certificate.distinguished_name.push(
-            DnType::OrganizationName,
-            self.org_name.clone().unwrap_or_default(),
-        );
-        new_certificate.distinguished_name.push(
-            DnType::OrganizationalUnitName,
-            self.org_unit.clone().unwrap_or_default(),
-        );
+    let root_cert_path = path.join("rootCA.crt");
+    let root_key_path = path.join("rootCA.key");
 
-        let new_certificate = new_certificate.signed_by(&new_key, &root_cert, &root_key)?;
+    let mut root_key_file = OpenOptions::new().read(true).open(&root_key_path)?;
+    let mut root_key_str = String::new();
+    root_key_file.read_to_string(&mut root_key_str)?;
 
-        let path = std::env::current_dir()?.to_str().unwrap().to_string();
-        fs::write(
-            format!("{path}/{cert_name}"),
-            new_certificate.pem().as_bytes(),
-        )?;
-        fs::write(
-            format!("{path}/{key_name}"),
-            new_key.serialize_pem().as_bytes(),
-        )?;
-        println!("Created new certificate in {path}");
+    let root_key = KeyPair::from_pem(&root_key_str)?;
 
-        Ok(())
-    }
+    let mut root_cert_file = OpenOptions::new().read(true).open(&root_cert_path)?;
+    let mut root_cert_str = String::new();
+    root_cert_file.read_to_string(&mut root_cert_str)?;
+
+    let root_cert = CertificateParams::from_ca_cert_pem(&root_cert_str)?.self_signed(&root_key)?;
+
+    let new_key = KeyPair::generate_for(&PKCS_ECDSA_P384_SHA384)?;
+    let mut new_certificate = CertificateParams::new(sans)?;
+
+    new_certificate.distinguished_name.push(
+        DnType::CommonName,
+        config.common_name.clone().unwrap_or_default(),
+    );
+    new_certificate.distinguished_name.push(
+        DnType::LocalityName,
+        config.locality.clone().unwrap_or_default(),
+    );
+    new_certificate.distinguished_name.push(
+        DnType::CountryName,
+        config.country.clone().unwrap_or_default(),
+    );
+    new_certificate.distinguished_name.push(
+        DnType::OrganizationName,
+        config.org_name.clone().unwrap_or_default(),
+    );
+    new_certificate.distinguished_name.push(
+        DnType::OrganizationalUnitName,
+        config.org_unit.clone().unwrap_or_default(),
+    );
+
+    let new_certificate = new_certificate.signed_by(&new_key, &root_cert, &root_key)?;
+
+    let path = std::env::current_dir()?;
+
+    let cert_path = path.join(&cert_name);
+    let key_path = path.join(&key_name);
+
+    let mut cert_file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .open(&cert_path)?;
+
+    let mut key_file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .open(&key_path)?;
+
+    cert_file.write_all(new_certificate.pem().as_bytes())?;
+    key_file.write_all(new_key.serialize_pem().as_bytes())?;
+
+    println!("Created new certificate in {}", cert_path.display());
+
+    Ok(())
 }
