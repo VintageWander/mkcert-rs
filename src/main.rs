@@ -2,7 +2,7 @@ mod config;
 use clap::Parser;
 
 use rcgen::{
-    BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, KeyPair,
+    BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair,
     KeyUsagePurpose, PKCS_ECDSA_P384_SHA384,
 };
 use sha1::{Digest, Sha1};
@@ -213,7 +213,7 @@ fn new_cert(cert_name: String, key_name: String, sans: Vec<String>) -> Result<()
     let mut root_cert_str = String::new();
     root_cert_file.read_to_string(&mut root_cert_str)?;
 
-    let root_cert = CertificateParams::from_ca_cert_pem(&root_cert_str)?.self_signed(&root_key)?;
+    let root_cert = Issuer::from_ca_cert_pem(&root_cert_str, root_key)?;
 
     let new_key = KeyPair::generate_for(&PKCS_ECDSA_P384_SHA384)?;
     let mut new_certificate = CertificateParams::new(sans)?;
@@ -239,7 +239,7 @@ fn new_cert(cert_name: String, key_name: String, sans: Vec<String>) -> Result<()
         config.org_unit.clone().unwrap_or_default(),
     );
 
-    let new_certificate = new_certificate.signed_by(&new_key, &root_cert, &root_key)?;
+    let new_certificate = new_certificate.signed_by(&new_key, &root_cert)?;
 
     let path = std::env::current_dir()?;
 
