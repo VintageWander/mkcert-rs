@@ -248,11 +248,13 @@ fn new_cert(cert_name: String, key_name: String, sans: Vec<String>) -> Result<()
 
     let mut cert_file = OpenOptions::new()
         .create(true)
+        .truncate(true)
         .write(true)
         .open(&cert_path)?;
 
     let mut key_file = OpenOptions::new()
         .create(true)
+        .truncate(true)
         .write(true)
         .open(&key_path)?;
 
