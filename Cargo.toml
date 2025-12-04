@@ -9,7 +9,7 @@ panic = "abort"
 codegen-units = 1
 
 [dependencies]
-clap = { version = "4.5.48", features = ["derive"] }
+clap = { version = "4.5.53", features = ["derive"] }
 rcgen = { version = "0.14.5", features = ["x509-parser", "crypto"] }
 thiserror = { version = "2.0.17" }
 rustls-pemfile = { version = "2.2.0" }
