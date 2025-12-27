@@ -10,10 +10,10 @@ codegen-units = 1
 
 [dependencies]
 clap = { version = "4.5.53", features = ["derive"] }
-rcgen = { version = "0.14.5", features = ["x509-parser", "crypto"] }
+rcgen = { version = "0.14.6", features = ["x509-parser", "crypto"] }
 thiserror = { version = "2.0.17" }
 rustls-pemfile = { version = "2.2.0" }
 serde = { version = "1.0.228", features = ["derive"] }
-serde_json = { version = "1.0.145" }
+serde_json = { version = "1.0.148" }
 dirs = "6.0.0"
 sha1 = "0.10.6"
