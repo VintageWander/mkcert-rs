@@ -143,7 +143,10 @@ fn install_ca() -> Result<(), Error> {
     let mut hasher = Sha1::new();
     hasher.update(ca_cert.der());
     let thumbprint_bytes = hasher.finalize();
-    let thumbprint = format!("{:X}", thumbprint_bytes);
+    let thumbprint = thumbprint_bytes
+        .iter()
+        .map(|b| format!("{:02X}", b))
+        .collect::<String>();
     Config::write_config(&Config {
         thumbprint: Some(thumbprint),
         ..config
