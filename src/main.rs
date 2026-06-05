@@ -219,20 +219,20 @@ fn new_cert(cert_name: String, key_name: String, sans: Vec<String>) -> Result<()
     let root_cert = Issuer::from_ca_cert_pem(&root_cert_str, root_key)?;
 
     let new_key = KeyPair::generate_for(&PKCS_ECDSA_P384_SHA384)?;
+
+    let leaf_cn = sans
+        .first()
+        .cloned()
+        .unwrap_or_else(|| "localhost".to_string());
+
     let mut new_certificate = CertificateParams::new(sans)?;
 
-    new_certificate.distinguished_name.push(
-        DnType::CommonName,
-        config.common_name.clone().unwrap_or_default(),
-    );
-    new_certificate.distinguished_name.push(
-        DnType::LocalityName,
-        config.locality.clone().unwrap_or_default(),
-    );
-    new_certificate.distinguished_name.push(
-        DnType::CountryName,
-        config.country.clone().unwrap_or_default(),
-    );
+    // Give the leaf its OWN subject. Reusing the CA's common name made
+    // subject DN == issuer DN, which strict X.509 validators treat as
+    // self-signed and refuse to chain to the root.
+    new_certificate
+        .distinguished_name
+        .push(DnType::CommonName, leaf_cn);
     new_certificate.distinguished_name.push(
         DnType::OrganizationName,
         config.org_name.clone().unwrap_or_default(),
@@ -241,6 +241,15 @@ fn new_cert(cert_name: String, key_name: String, sans: Vec<String>) -> Result<()
         DnType::OrganizationalUnitName,
         config.org_unit.clone().unwrap_or_default(),
     );
+
+    // Proper end-entity (leaf) certificate properties.
+    new_certificate.is_ca = IsCa::ExplicitNoCa; // basicConstraints CA:FALSE
+    new_certificate.key_usages = vec![KeyUsagePurpose::DigitalSignature]; // correct for ECDSA leaves
+    new_certificate.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
+
+    // Emit an Authority Key Identifier pointing at the CA's Subject Key
+    // Identifier, so validators can build leaf -> root.
+    new_certificate.use_authority_key_identifier_extension = true;
 
     let new_certificate = new_certificate.signed_by(&new_key, &root_cert)?;
 
